@@ -16,23 +16,21 @@ DiffAlg computes the standard operations with polynomial differential forms and 
 
 ## Installation
 
-Clone the repository and run SageMath from the `DiffAlg/` directory:
+Install directly from GitHub into your SageMath environment:
 
 ```bash
-git clone https://github.com/amoli79/diffalg.git
+sage -pip install git+https://github.com/DiffAlg/diffalg.git
+```
+
+Or clone and install in editable mode (changes to the source take effect immediately):
+
+```bash
+git clone https://github.com/DiffAlg/diffalg.git
 cd diffalg
-sage -python -c "from diff_alg import *"
+sage -pip install -e .
 ```
 
-Or run interactively:
-
-```bash
-sage
-```
-```python
-sage: import sys; sys.path.insert(0, '/path/to/diffalg')
-sage: from diff_alg import *
-```
+After installation, `from diff_alg import *` works in any Sage session.
 
 ## Quick Start
 
