@@ -131,6 +131,10 @@ X = new_field("x0^2 * D0 - x1*x2 * D2")
 sage -python -m pytest tests/
 ```
 
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
 ## References
 
 - M. Dubinsky, C. Massri, A. Molinuevo, F. Quallbrunn. *DiffAlg: a Macaulay2 package for differential algebra.* J. Softw. Algebra Geom. 9 (2019), 11–16. [DOI: 10.2140/jsag.2019.9.11](https://doi.org/10.2140/jsag.2019.9.11)
