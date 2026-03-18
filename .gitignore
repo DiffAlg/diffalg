@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# SageMath
+*.sobj
+*.sage.py
+
+# Testing
+.pytest_cache/
+.tox/
+htmlcov/
+.coverage
+coverage.xml
+
+# LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.blg
+*.bbl
+
+# Archives
+*.zip
+*.tar.gz
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+CLAUDE.md

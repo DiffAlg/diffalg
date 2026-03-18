@@ -1,0 +1,410 @@
+\documentclass{amsart}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{cleveref}
+\usepackage[all]{xy}
+\usepackage{hhline}
+\usepackage{multirow}
+\usepackage{mathtools}
+\usepackage{listings}
+
+\lstset{
+  basicstyle=\ttfamily,
+  mathescape
+}
+
+\theoremstyle{definition}
+\newtheorem{ex}{Example}
+
+\renewcommand{\theenumi}{\alph{enumi}}
+
+\def\CC{\mathbb{C}}
+\def\KK{\mathbb{K}}
+\def\PP{\mathbb{P}}
+\def\NN{\mathbb{N}}
+
+\def\dA{{\ttfamily DiffAlg}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\title{\dA: a Differential Algebra Package}
+
+\author[M. Dubinsky]{Manuel Dubinsky}
+\address{Departamento de Computaci\'on\\ Universidad de Avellaneda\\ Argentina}
+\email{manudubinsky@gmail.com}
+
+\author[C. Massri]{C\'esar Massri}
+\address{Departamento de Matem\'atica\\ Universidad CAECE\\ Argentina}
+\email{cmassri@caece.edu.ar}
+
+\author[A. Molinuevo]{Ariel Molinuevo}
+\address{Instituto de Matem\'atica\\
+Universidade Federal do Rio de Janeiro\\
+Brasil}
+\email{amoli@dm.uba.ar}
+
+
+\author[F. Quallbrunn]{Federico Quallbrunn}
+\address{Departamento de Matem\'atica\\ Universidad CAECE y FCEN, UBA\\ Argentina}
+\email{fquallb@dm.uba.ar}
+
+\thanks{The authors were supported by CONICET, Argentina.}
+
+
+\subjclass[2010]{53-04; 14-04}
+\keywords{Differential operators, Exterior algebra, Vector Fields}
+
+
+\begin{document}
+
+\begin{abstract}
+In this article we present \dA, a differential algebra package for Macaulay2. 
+It can perform the following operations: wedge products and exterior differential of differential forms, contraction and Lie derivative of a differential form with respect to a vector field and Lie brackets between vector fields.
+
+Given a homogeneous differential operator of degree one $D$, the lack of an algebraic module structure attached to the kernel or image of $D$ hinders the study of $D$. The main purpose of \dA\ is to handle these spaces degree-wise.
+\end{abstract}
+
+\maketitle
+
+\section{Motivation and description of the package}
+
+\
+
+Algebraic and differential operations arise naturally when working with differential forms and vector fields, \emph{e.g.}:  wedge products and exterior differential of differential forms, contraction and Lie derivative of a differential form with respect to a vector field and Lie brackets between vector fields. Some important statements involving these operations include the following:
+\begin{enumerate}
+\item A differential $r$-form $\omega$ in the affine space $\KK^{n+1}$ \emph{descends to the projective space} $\PP^n_{\KK}$, if it satisfies the equation
+\[
+i_R\omega=0,
+\]
+where $\KK$ is a field, $R$ is the \text{radial vector field} $R=\sum x_i\frac{\partial}{\partial x_i}$ and $i_R$ denotes the contraction, see \cite[Theorem 8.13, p.~176]{hart}.
+\item If $\omega$ is a differential $1$-form, then $\omega$ defines a foliation in $\KK^{n+1}$ if it satisfies the \emph{Frobenius integrability condition} given by the equation
+\[
+\omega\wedge d\omega=0,
+\]
+see \cite[Definition 2.2, p.~823]{suwa-review}.
+\item Let $\omega$ be an integrable 1-form and $L_X\omega$ the Lie derivative of $\omega$ with respect to a vector field $X$. Then, the solutions of the equation 
+\[
+L_X\omega=0
+\]
+define all the \emph{infinitesimal automorphisms} of the foliation given by $\omega$,
+see \cite[Proposition 7.7, p.~845]{suwa-review}.
+\item Let $\omega$ be an integrable 1-form. Then the \emph{tangent space of the space of foliations} at $\omega$ is given by the differential $1$-forms $\eta$ that satisfy the equation
+\[
+\omega\wedge d\eta + d\omega\wedge \eta=0,
+\]
+see \cite[Section 2.1. p.~709]{fji}.
+\item Let $D$ be a \emph{bracket generating distribution}.
+Some important invariants of $D$ are the ranks of the derived sequence
+\[
+ a(p):=\text{rank}\, D^{(p)}=\mathrm{rank}\left( D^{(p-1)}+[D,D^{(p-1)}]\right),
+ \]
+ see \cite[\S 1, pp.~8-9]{Tanaka}.
+\item A \emph{symplectic structure} in a variety of dimension $2r$ is given by a $2$-form $\omega$ such that $d\omega=0$ and $\omega^{r}\neq 0$, see \cite[p.~41]{bcggg}.
+% \item The exterior algebra of differential forms of the projective space $\PP^n_\KK$ can be endowed with a graded, associative and super commutative product given by the \emph{second multiplication of Gelfand-Kapranov-Zelevinsky} defined as
+% \[
+% \omega\star\eta =
+% \left\{
+% \begin{aligned}
+% &\frac{e}{e+d}\ \omega\wedge d\eta - (-1)^r \frac{d}{e+d}\ d\omega\wedge\eta\qquad &&\text{if }e,d\neq 0 \\
+% &0&&\text{if $e$ or $d$ equals $0$}
+% \end{aligned}
+% \right.
+% \]
+% where $\omega$ is a differential $r$-form and $\eta$ is a differential $s$-form with homogeneous coefficients of degree $e-r$ and $d-s$ respectively, see \cite[Chapter 2, 4. B., p.~72]{gkz}.
+\end{enumerate}
+
+\bigskip
+
+For a clear understanding on how \dA\ deals with such equations, let us fix some notation.
+
+\bigskip
+
+Let $S=\KK[x_0,\ldots,x_n]$ be the polynomial ring in $n+1$ variables and let $\Omega=\bigoplus_{r\geq 0} \Omega^r$ be the exterior algebra of differential forms of $S$ over $\KK$. Let $\Omega^r(d)$ denote the space of $r$-forms with polynomial coefficients of homogeneous degree $d$, where we assign degree 1 to each $x_i$ and degree 0 to each $dx_i$.
+
+Therefore $\omega\in\Omega^r(d)$ can be written as
+\begin{equation}\label{omega}
+\omega = \sum_{\substack{I\subset \{0,\ldots,n\} \\ \#I=r}} \sum_{\substack{\alpha\in\NN^{n+1}\\ |\alpha|=d}} \ a_{\alpha,I}\ x^\alpha \ dx_I,\qquad a_{\alpha,I}\in\KK,
+\end{equation}
+where for each $I$ of the form $I=\{i_1,\ldots,i_r\}\subset \{0,\ldots,n\}$ let $dx_I$ denote $dx_{i_1}\wedge\ldots\wedge dx_{i_r}$ and each $\alpha=(\alpha_0,\ldots,\alpha_n)\in\NN^{n+1}$ denote $|\alpha|:=\sum_{i=0}^n\alpha_i$ and $x^\alpha:=x_0^{\alpha_0}.\ldots.x_n^{\alpha_n}$.
+
+\bigskip
+
+Let $T$ be the module of vector fields with coefficients in $S$. Let $T(e)$ denote the homogeneous vector fields with polynomial coefficients of degree $e$, where we assign degree 1 to each $x_i$ and degree 0 to each $\frac{\partial}{\partial x_i}$ and, analogously to \cref{omega}, $X\in T(e)$ can be written as
+\[
+X = \sum_{i=0}^n \sum_{\substack{\beta\in\NN^{n+1}\\ |\beta|=e}} \ b_{\beta,i}\ x^\beta \ \frac{\partial}{\partial x_i},\qquad b_{\beta,i}\in\KK.
+\]
+
+\bigskip
+
+Current algebraic software systems implement functionality to deal with differential forms and vector fields, but usually scalar parameters $a_{\alpha,I}$ and $b_{\beta,i}$ must be specified as fixed elements in $\KK$.
+Instead, \dA\ treats homogeneous forms and vector fields in a completely symbolic environment by considering the scalar coefficient rings
+\[
+\KK[a_{\alpha,I}]\qquad \text{and}\qquad \KK[b_{\beta,i}].
+\]
+Scalar coefficients can be systematically obtained by looking at the coordinates of differential forms and vector fields written in the standard basis
+\[
+\mathcal{B}_{r,d} = \left\{x^\alpha dx_I\right\}_{\substack{\#I=r\\|\alpha|=d}}\qquad\text{and}\qquad \mathcal{B}_{e} = \left\{ x^\beta\tfrac{\partial}{\partial x_i}\right\}_{|\beta|=e}
+\]
+of the spaces $\Omega^r(d)$ and $T(e)$, respectively.
+
+\bigskip
+
+
+Importantly, when using \dA, each object is expected to be defined in its own coefficient ring. Then, computing some operations like wedge product or contraction
+involve different input and output rings, producing a modification of the coefficients rings $\KK[a_{\alpha,I}]$ or $\KK[b_{\beta,i}]$. For greater clarity, consider the following example. Fix $\omega\in\Omega^r(d)$ and $X\in T(e)$ and consider the contraction $i_X\omega\in\Omega^{r-1}(d+e)$.
+Then, the following elements will be taking place:
+
+\[
+\begin{tabular}{ l  c  c c c }
+  \small{Operation} & $(\omega,X)$ & $\xmapsto{\hspace{1cm}}$& $i_X\omega$\\[.9em]
+  \small{Rings} & $\KK[a_{\alpha,I}]\times\KK[b_{\beta,i}]$ & & $\KK[a_{\alpha,I},b_{\beta,i}]$\\[.6em]
+  \small{Basis} & $\mathcal{B}_{r,d}\times\mathcal{B}_{e}$ & &  $\mathcal{B}_{r-1,d+e}$ \\[.6em]
+\end{tabular}
+\]
+
+\bigskip
+
+As mentioned before, the main purpose of \dA\ is to find algebraic solutions to equations in the context of differential algebra. Equations are treated differently in the linear and non-linear cases:
+\begin{enumerate}
+\item[i)] In the linear case, for example $i_R\omega=0$, \dA\ can compute a basis of the solutions of the equation. Once this is done, it can also compute a generic linear combination of the elements of the basis, see Example \ref{ex1}.
+\item[ii)] In the non-linear case, for example $\omega\wedge d\omega=0$, the coordinates will be polynomial. In this case \dA\ would compute the ideal generating the space of solutions. This ideal can be obtained in two different ways: taking coordinates in the basis $\mathcal{B}_{r,d}$ or $\mathcal{B}_{e}$ or taking coordinates in the basis $\{dx_I\}$ or $\{\frac{\partial}{\partial x_i}\}$, see Examples \ref{ex2} and \ref{ex4}.
+\end{enumerate}
+
+\bigskip
+\dA\ can also be a valuable tool for studying differential operators. The lack of an algebraic theory to deal with such objects can be mitigated by non-conclusive computations easily made by \dA. As a first example, one could consider computing solutions of the annihilation of a differential operator degree-wise for low degrees.
+
+
+\section{Some examples}
+
+\ex\label{ex1} In the following example we obtain a basis of the space of projective differential 2-forms in $\PP_\KK^3$. Then, we define a generic projective differential 2-form to be possibly used in further computations.
+
+\bigskip
+
+{\tt\footnotesize
+\begin{lstlisting}
+i1 : loadPackage "DiffAlg";
+
+i2 : R = radial 3
+
+o2 = x ax  + x ax  + x ax  + x ax
+      0  0    1  1    2  2    3  3
+
+o2 : DiffAlgField
+
+i3 : w = newForm(3,2,1,"a");   
+
+o3 = (a x +a x +a  x +a  x )dx dx +(a x  + a x  + a  x  + a  x )dx dx 
+     0 0  6 1  12 2  18 3   0  1   1 0    7 1    13 2    19 3   0  2
+     ---------------------------------------------------------------
+     + (a x  + a x  + a  x  + a  x )dx dx  + (a x  + a x  + a  x  +
+         3 0    9 1    15 2    21 3   1  2     2 0    8 1    14 2  
+     ---------------------------------------------------------------
+     a  x )dx dx  + (a x  + a  x  + a  x  + a  x )dx dx +(a x +a  x  +
+      20 3   0  3     4 0    10 1    16 2    22 3   1  3   5 0  11 1  
+     ---------------------------------------------------------------
+     a  x  + a  x )dx dx
+      17 2    23 3   2  3
+
+o3 : DiffAlgForm
+
+i4 : pretty ring w
+
+      QQ[i]
+o4 = ------[][a , a , a , a , a , a , a , a , a , a , a  , a  , a  ,
+      2        0   1   2   3   4   5   6   7   8   9   10   11   12 
+     i  + 1
+     ---------------------------------------------------------------
+      a  , a  , a  , a  , a  , a  , a  , a  , a  , a  , a  ][x , x , 
+       13   14   15   16   17   18   19   20   21   22   23   0   1 
+     ---------------------------------------------------------------
+     x , x ][dx , dx , dx , dx ]
+      2   3    0    1    2    3
+                                                                
+i5 : K = genKer (R _ w, w);
+
+i6 : length K
+
+o6 = 4
+
+i7 : v = linearComb(K,"a")
+
+o7 = (a x  - a x )dx dx +(- a x  + a x )dx dx  + (a x  + a x )dx dx +
+       0 2    1 3   0  1     0 1    2 3   0  2     0 0    3 3   1  2
+     ----------------------------------------------------------------
+     (a x  - a x )dx dx  + (-a x  - a x )dx dx  + (a x  + a x )dx dx
+       1 1    2 2   0  3      1 0    3 2   1  3     2 0    3 1   2  3
+
+o7 : DiffAlgForm
+
+i8 : pretty ring v
+
+      QQ[i]
+o8 = ------[][a , a , a , a ][x , x , x , x ][dx , dx , dx , dx ]
+       2        0   1   2   3   0   1   2   3    0    1    2    3
+      i  + 1
+\end{lstlisting}
+}
+
+\noindent Let us explain part of the code:
+\begin{itemize}
+\item[\tt i2.]
+Creates the radial vector field in 4 variables. We are 
+denoting the basic field ${\partial}/{\partial x_i}$ as $ax\_i$.
+\item[\tt i3.]
+Creates a generic linear 2-form in $\Omega^2_{\KK^4}(1)$, where the coefficients 
+are indexed as $a_i$.
+\item[\tt i4.]
+Shows the ring of definition of $w$.
+\item[\tt i5.]
+Gets a basis (as a Macaulay2 list) of forms in $\Omega^2_{\KK^4}(1)$ that 
+descend to projective space. The operation $R \_ w$ computes the 
+contraction of the differential form $w$ with the vector field $R$.
+\item[\tt i6.]
+Gets the dimension of $\Omega^2_{\PP^3}(1)$ in projective 3-space
+\item[\tt i7.]
+Defines a generic projective form with coefficients $a_i$.
+\item[\tt i8.]
+Shows the ring of definition of $v$.
+\end{itemize}
+
+
+\bigskip
+
+\ex\label{ex2} In the finite dimensional $\KK$-vector space $\Omega^1(d)$, the solutions of the equation $\omega\wedge d\omega=0$ determine an algebraic variety, its points are the integrable differential 1-forms of degree $d$.  In the following example, we compute the equations of the variety of integrable 1-forms of degree 1 in 3-dimensional space.
+
+It is worth mentioning that, for $n\geq 3$ and $d>5$, it is an open problem to classify the irreducible components of this varieties, see \cite{fji}.
+
+\bigskip
+
+{\tt\footnotesize
+\begin{lstlisting}
+i1 : loadPackage "DiffAlg";
+
+i2 : w = newForm (2,1,1,"a")
+
+o2 = (a x  + a x  + a x )dx  + (a x  + a x  + a x )dx +(a x  + a x +
+       0 0    3 1    6 2   0     1 0    4 1    7 2   1   2 0    5 1    
+     ---------------------------------------------------------------
+        a x )dx
+         8 2   2
+
+o2 : DiffAlgForm
+
+i3 : moduliIdeal (w ^ (diff w))
+
+o3 = ideal (- a a  + a a  + a a  - a a , - a a  + a a  + a a  - a a ,
+               2 3    0 5    1 6    0 7     2 4    1 5    4 6    3 7
+     ----------------------------------------------------------------
+            a a  - a a  + a a  - a a )
+             5 6    2 7    1 8    3 8
+
+               QQ[i]
+o3 : Ideal of ------[][a , a , a , a , a , a , a , a , a ]
+               2        0   1   2   3   4   5   6   7   8
+              i  + 1
+\end{lstlisting}
+}
+
+\noindent About the code:
+\begin{itemize}
+\item[\tt i2.]
+Creates a generic linear 1-form in $\Omega^1_{\KK^3}(1)$, with coefficients $a_i$.
+\item[\tt i3.]
+Returns the ideal of the scalar coefficients given by 
+$w \wedge d w = 0$.
+\end{itemize}
+
+\ex\label{ex3} Let $D$ be a 2-dimensional distribution generated by vector fields $X$ and $Y$ in 5-dimensional space.
+In the following example we compute the ranks of the derived distributions $D^{(p)}$.
+We verify that this derived series
+eventually spans the entire tangent space. A distribution $D$ satisfying this
+condition is called \emph{bracket-generating}.
+
+\bigskip
+
+{\tt\footnotesize
+\begin{lstlisting}
+i2 : X = newField "x_0^2*ax_0+x_1^2*ax_1+x_2^2*ax_2+x_3^2*ax_3";
+
+i3 : Y = newField "x_5*ax_0+x_4*ax_1+x_3*ax_2+x_2*ax_3+x_1*ax_4+
+         x_0*ax_5";
+
+i4 : D_0 = {X,Y};
+
+i5 : for b in 1..3 do (
+      for a in D_(b-1) do (
+       D_b = join(D_(b-1),{a|Y,a|X})
+      )
+     );
+
+i6 : {rank dist D_0, rank dist D_1, rank dist D_2, rank dist D_3}
+
+o6 = {2, 3, 5, 6}
+
+o6 : List
+\end{lstlisting}
+}
+
+\noindent About the code:
+\begin{itemize}
+\item[\tt i5.]
+Computes the derived sequence.
+\item[\tt i6.]
+Prints the ranks of the derived series.
+\end{itemize}
+
+\bigskip
+
+\ex\label{ex4} In the following example, we generate a random rational 1-form of type (1,2) in $\PP^2_\KK$. First, we compute (the dimension of) the space of its integrating factors, see \cite[pp.~828-829]{suwa-review}. Then, we compute the ideal of its singular 
+locus (the ideal where it vanishes).
+
+\bigskip
+
+{\tt\footnotesize
+\begin{lstlisting}
+i2 : w = random logarithmicForm (2,{1,2},"a",Projective => true);
+
+i3 : f = newForm (2,0,3,"a");
+
+i4 : length genKer(w^(diff f) + f*(diff w), f)
+
+o4 = 2
+
+i5 : I = singularIdeal w
+
+                         2                        2    2
+o6 = ideal (- 9x x  + 63x  - 36x x  - 54x x  - 54x , 9x  - 63x x  -
+                0 1      1      0 2      1 2      2    0      0 1
+     -----------------------------------------------------------------
+                  2     2               2
+      27x x  -45x x  - 54x , 36x  + 81x x  + 45x  + 54x x  + 54x x )
+         0 2     1 2      2     0      0 1      1      0 2      1 2
+
+               QQ[i]
+o6 : Ideal of ------[][x , x , x ]
+               2        0   1   2
+              i  + 1
+\end{lstlisting}
+}
+
+% % % % % % % % % % % %
+% % % % % % % % % % % %
+% BIBLIOGRAPHY
+% % % % % % % % % % % %
+% % % % % % % % % % % %
+
+\bibliography{biblio}{}
+\bibliographystyle{amsplain}
+
+% \bigskip
+
+% \bigskip
+
+\end{document}
