@@ -15,6 +15,8 @@ DiffAlg computes the standard operations with polynomial differential forms and 
 
 ## Installation
 
+### Standard
+
 Install directly from GitHub into your SageMath environment:
 
 ```bash
@@ -28,6 +30,21 @@ git clone https://github.com/DiffAlg/diffalg.git
 cd diffalg
 sage -pip install -e .
 ```
+
+### Arch Linux (and other PEP 668 distributions)
+
+On Arch Linux, SageMath uses the system Python, which is governed by PEP 668 and
+blocks `sage -pip` from writing to system site-packages. Use `pip` directly with
+`--user` and `--break-system-packages`:
+
+```bash
+git clone https://github.com/DiffAlg/diffalg.git
+cd diffalg
+pip install --user --break-system-packages -e .
+```
+
+`--user` installs to `~/.local/lib/python*/site-packages/`, which Sage loads
+automatically — no system files are modified.
 
 After installation, `from diff_alg import *` works in any Sage session.
 
