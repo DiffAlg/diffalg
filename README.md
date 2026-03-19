@@ -4,8 +4,7 @@ A port of the [Macaulay2 package DiffAlg](https://doi.org/10.2140/jsag.2019.9.11
 
 DiffAlg computes the standard operations with polynomial differential forms and vector fields. Its main purpose is to associate algebraic objects to differential operators in the exterior algebra of differential forms.
 
-**Original Macaulay2 package by** M. Dubinsky, C. Massri, A. Molinuevo, F. Quallbrunn.  
-*The Journal of Software for Algebra and Geometry*, vol. 9, 2019. [DOI: 10.2140/jsag.2019.9.11](https://doi.org/10.2140/jsag.2019.9.11)
+**Original Macaulay2 package by** M. Dubinsky, C. Massri, A. Molinuevo, F. Quallbrunn — [DiffAlg — Macaulay2 package documentation](https://macaulay2.com/doc/Macaulay2-1.21/share/doc/Macaulay2/DiffAlg/html/index.html)
 
 ---
 
@@ -137,4 +136,5 @@ This project is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ## References
 
-- M. Dubinsky, C. Massri, A. Molinuevo, F. Quallbrunn. *DiffAlg: a Macaulay2 package for differential algebra.* J. Softw. Algebra Geom. 9 (2019), 11–16. [DOI: 10.2140/jsag.2019.9.11](https://doi.org/10.2140/jsag.2019.9.11)
+- M\. Dubinsky, C\. Massri, A\. Molinuevo, F\. Quallbrunn. *DiffAlg: a Macaulay2 package for differential algebra.* J. Softw. Algebra Geom. 9 (2019), 11–16. [DOI: 10.2140/jsag.2019.9.11](https://doi.org/10.2140/jsag.2019.9.11)
+- [DiffAlg — Macaulay2 package documentation](https://macaulay2.com/doc/Macaulay2-1.21/share/doc/Macaulay2/DiffAlg/html/index.html)
