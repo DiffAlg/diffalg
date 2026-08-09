@@ -114,6 +114,8 @@ ker = gen_ker(h.contract(R), h)       # returns basis of the kernel
 | `degree` | `(n, d)` — space dimension, polynomial degree |
 | `bracket(other)` | Lie bracket $[X, Y]$ |
 | `is_homogeneous()` | Test homogeneity of coefficients |
+| `homogenize()` | Homogenize the field |
+| `projectivize()` | Same as `homogenize()` for fields |
 | `randomize()` | Replace parameters with random integer coefficients |
 
 ### Operations on `DiffAlgDistribution`
@@ -134,7 +136,7 @@ ker = gen_ker(h.contract(R), h)       # returns basis of the kernel
 | `radial(n)` | Radial (Euler) field $\sum x_i \partial/\partial x_i$ |
 | `logarithmic_form(n, degrees, var)` | Logarithmic form for hypersurfaces of degrees `[d0,d1,...]` |
 | `linear_comb(forms, var)` | Parametric linear combination |
-| `dist(*fields)` | Distribution from a list of fields |
+| `dist([X, Y, ...])` | Distribution from a list of fields |
 
 ### Kernel and Image
 
@@ -148,8 +150,9 @@ R = radial(2)
 h = new_form(2, 1, 2, "b")
 ker = gen_ker(h.contract(R), h)   # list of basis forms
 
-# Non-homogeneous system: find h such that i_R(h) = w0 (fixed form)
-w0 = new_form(2, 0, 1, "c").randomize()
+# Non-homogeneous system: find h such that i_R(h) = w0 (fixed form).
+# i_R(h) has coefficient degree 3, so w0 must too.
+w0 = new_form(2, 0, 3, "c").randomize()
 basis, particular = gen_ker(h.contract(R) - w0, h)
 
 # Image: span of d(h) as h ranges over all linear 1-forms
@@ -164,7 +167,7 @@ Supports both `x0`/`dx0` and `x_0`/`dx_0` notation, and `^` or `**` for exponent
 
 ```python
 w = new_form("x_0*dx_1 - x_1*dx_0")
-X = new_field("x0^2 * D0 - x1*x2 * D2")
+X = new_field("x0^2 * ax0 - x1*x2 * ax2")   # ax_i stands for d/dx_i
 ```
 
 ## Running the Tests
@@ -176,6 +179,9 @@ sage -python -m pytest tests/
 # Arch Linux (Sage uses system Python)
 python -m pytest tests/
 ```
+
+If globally installed pytest plugins interfere (e.g. `pytest-enabler` injecting
+`--mypy-*` options), disable them with `python -m pytest tests/ -p no:enabler`.
 
 ## License
 

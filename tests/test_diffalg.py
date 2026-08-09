@@ -682,3 +682,201 @@ class TestStringParsing:
         assert not f.is_zero
         df = f.exterior_diff()
         assert not df.is_zero
+
+    def test_parse_constant(self):
+        """Constant expressions parse as constant 0-forms."""
+        from diff_alg.core import new_form
+        assert not new_form("3").is_zero
+        assert (new_form("3") - new_form("2") - new_form("1")).is_zero
+
+    def test_parse_rational_literal_exact(self):
+        """Rational literals are exact in QQ, not Python floats."""
+        from diff_alg.core import new_form
+        w = new_form("1/3*dx0")
+        assert w == new_form("dx0") / 3
+        assert (new_form("7/2*x0*dx0") - new_form("x0*dx0") * 7 / 2).is_zero
+        assert (new_form("3/2") * 2 - new_form("3")).is_zero
+
+    def test_parse_field_rejects_non_ax_terms(self):
+        """Terms not linear in ax_i must raise, not vanish silently."""
+        import pytest
+        from diff_alg.core import new_field
+        for expr in ["x0*ax0 + x1", "x0^2*D0 - x1*x2*D2", "3", "x0*ax0*ax1"]:
+            with pytest.raises(ValueError):
+                new_field(expr)
+
+    def test_generic_form_parameter_order_matches_m2(self):
+        """new_form(2,1,1,'a') assigns parameters x-monomial-major, as M2."""
+        from diff_alg.core import new_form
+        w = new_form(2, 1, 1, "a")
+        expected = new_form(
+            "(a0*x0 + a3*x1 + a6*x2)*dx0 + (a1*x0 + a4*x1 + a7*x2)*dx1"
+            " + (a2*x0 + a5*x1 + a8*x2)*dx2"
+        )
+        assert w == expected
+
+
+# ════════════════════════════════════════════════════════════════
+# Regression tests for bugs found in the 2026-08 audit
+# ════════════════════════════════════════════════════════════════
+
+class TestScalarDivision:
+
+    def test_form_division(self):
+        """w / 2 must not recurse infinitely (old __truediv__ bug)."""
+        from diff_alg.core import new_form
+        w = new_form("x0*dx1 - x1*dx0")
+        assert (w / 2 + w / 2) == w
+
+    def test_field_division(self):
+        from diff_alg.core import new_field
+        X = new_field("x0*ax0 + x1*ax1")
+        assert (X / 3) * 3 == X
+
+
+class TestSingleVariableRings:
+    """n=0 elements live in a 1-variable ring (old univariate crash)."""
+
+    def test_cross_ring_ops_with_n0(self):
+        from diff_alg.core import new_form, new_field
+        a = new_form("x0^2*dx0")
+        b = new_form("x0*dx1")
+        assert (a + b) - b == a
+        assert not a.wedge(b).is_zero
+        assert not (new_field("x0*ax0") | new_field("x0*ax1")).is_zero
+
+    def test_n0_degree_and_homogeneity(self):
+        from diff_alg.core import new_form, new_field
+        assert new_form("x0*dx0").degree == (0, 1, 1)
+        assert new_form("x0*dx0").is_homogeneous()
+        assert new_field("x0*ax0").degree == (0, 1)
+
+
+class TestInequality:
+
+    def test_ne_cross_type(self):
+        """w != X must return True, not raise (old __ne__ bug)."""
+        from diff_alg.core import new_form, new_field
+        w = new_form("x0*dx1 - x1*dx0")
+        X = new_field("x0*ax1")
+        assert w != X
+        assert X != w
+        assert w != "foo"
+        assert not (w != w)
+
+
+class TestHomogenize:
+
+    def test_homogenize_uses_total_degree(self):
+        """Mixed exterior degrees, homogeneous total degree: no-op (M2)."""
+        from diff_alg.core import new_form
+        w = new_form("x0^2*dx0 + x1*dx0*dx1")
+        assert w.is_homogeneous()
+        wh = w.homogenize()
+        assert wh.is_homogeneous()
+        assert wh == w
+
+    def test_homogenize_m2_doc_example(self):
+        from diff_alg.core import new_form
+        wh = new_form("2*x_0*dx_0+x_1^2*dx_1").homogenize()
+        assert wh == new_form("2*x0*x2*dx0 + x1^2*dx1")
+        assert wh.is_homogeneous()
+
+    def test_is_homogeneous_per_term(self):
+        """Inhomogeneity inside a single coefficient must be detected."""
+        from diff_alg.core import new_form, new_field
+        assert not new_form("x0^2*dx0 + x0*dx0 + x1^2*dx1").is_homogeneous()
+        assert not new_field("x0^2*ax0 + x0*ax0 + x1^2*ax1").is_homogeneous()
+
+    def test_field_homogenize(self):
+        """M2 doc example: homogenize newField("ax_0+x_1*ax_2+a*ax_1")."""
+        from diff_alg.core import new_field
+        Xh = new_field("ax_0+x_1*ax_2+a*ax_1").homogenize()
+        assert Xh == new_field("x3*ax0 + a*x3*ax1 + x1*ax2")
+        assert Xh.is_homogeneous()
+        assert Xh.n == 3
+
+    def test_field_projectivize_is_homogenize(self):
+        from diff_alg.core import new_field
+        X = new_field("ax_0+x_1*ax_2")
+        assert X.projectivize() == X.homogenize()
+
+    def test_projectivize_mixed_form(self):
+        """i_R(projectivize(w)) = 0 also for forms fixed by the total-degree rule."""
+        from diff_alg.core import new_form, radial
+        w = new_form("2*x_0*dx_0+x_1^2*dx_1")
+        p = w.projectivize()
+        assert p.contract(radial(2)).is_zero
+
+
+class TestRandomizeM2Parity:
+
+    def test_zero_density_returns_zero_with_warning(self):
+        import warnings
+        from diff_alg.core import new_form, new_field
+        with warnings.catch_warnings(record=True) as rec:
+            warnings.simplefilter("always")
+            z = new_form(2, 1, 2, "a").randomize(density=0.0)
+            zf = new_field(2, 1, "a").randomize(density=0.0)
+        assert z.is_zero and zf.is_zero
+        assert len(rec) == 2
+
+
+class TestPullbackValidation:
+
+    def test_short_morphism_raises(self):
+        import pytest
+        from diff_alg.core import new_form
+        w2 = new_form("x0*dx1*dx2 + x2*dx0*dx1")
+        with pytest.raises(ValueError):
+            w2.pullback([new_form("x0*x1"), new_form("x1")])
+
+    def test_non_0form_component_raises(self):
+        import pytest
+        from diff_alg.core import new_form
+        w2 = new_form("x0*dx1*dx2")
+        with pytest.raises(ValueError):
+            w2.pullback([new_form("x0*dx0"), new_form("x1"), new_form("x2")])
+
+    def test_pullback_commutes_with_d(self):
+        from diff_alg.core import new_form
+        w = new_form("x0*x1*dx1 - x2^2*dx0")
+        phi = [new_form("x0^2+x1^2"), new_form("x1*x2"), new_form("x0*x2")]
+        assert w.exterior_diff().pullback(phi) == w.pullback(phi).exterior_diff()
+
+
+class TestGenKerGenImRegressions:
+
+    def test_particular_not_rescaled(self):
+        """No polynomial particular exists -> None, not a rescaled fake."""
+        from diff_alg.core import new_form, gen_ker
+        h0 = new_form(2, 0, 1, "b")
+        basis, particular = gen_ker(new_form("a").wedge(h0) - new_form("x0"), h0)
+        assert particular is None
+
+    def test_particular_with_parameters_exact(self):
+        from diff_alg.core import new_form, gen_ker
+        h = new_form(2, 1, 1, "b")
+        w0 = new_form(2, 1, 1, "c").randomize()
+        basis, particular = gen_ker(h - new_form("a").wedge(w0), h)
+        assert particular is not None
+        assert (particular - new_form("a").wedge(w0)).is_zero
+
+    def test_nonlinear_expression_raises(self):
+        import pytest
+        from diff_alg.core import new_form, gen_ker, gen_im
+        hh = new_form(2, 0, 1, "b")
+        with pytest.raises(ValueError):
+            gen_ker(hh.wedge(hh) - new_form("x0^2"), hh)
+        with pytest.raises(ValueError):
+            gen_im(hh.wedge(hh), hh)
+
+    def test_gen_im_subtracts_constant_part(self):
+        """gen_im of a non-homogeneous expression = image of its linear part."""
+        from diff_alg.core import new_form, gen_im
+        w1 = new_form(2, 1, 1, "a").randomize()
+        h = new_form(2, 1, 1, "b")
+        w3 = new_form(2, 2, 1, "c").randomize()
+        im = gen_im(w1.wedge(h) - w3, h)
+        assert all(e.is_homogeneous() for e in im)
+        assert len(im) == len(gen_im(w1.wedge(h), h))

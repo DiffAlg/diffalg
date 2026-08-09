@@ -14,17 +14,17 @@ A DiffAlgField of type (n, d) is a vector field in (n+1) variables with
 homogeneous polynomial coefficients of degree d.
 """
 
+import re as _re
+import warnings
 from itertools import combinations
+
 from sage.all import (
     QQ,
     PolynomialRing,
     ExteriorAlgebra,
+    Integer,
     binomial,
-    Combinations,
-    matrix,
-    vector,
     ZZ,
-    SR,
 )
 
 
@@ -49,7 +49,9 @@ def _make_rings(n, param_names=None):
         all_names = list(param_names) + x_names
     else:
         all_names = x_names
-    R = PolynomialRing(QQ, all_names)
+    # Always multivariate, even with a single generator (n=0, no params):
+    # the univariate ring has a different iteration/exponent API.
+    R = PolynomialRing(QQ, len(all_names), all_names)
     dx_names = _var_names("dx", n)
     E = ExteriorAlgebra(R, dx_names)
     nparams = len(param_names) if param_names else 0
@@ -106,14 +108,6 @@ def _sub_poly(poly, old_R, new_R, name_map=None):
         name_map = {str(g): g for g in new_R.gens()}
     if poly in QQ:
         return new_R(poly)
-    result = new_R.zero()
-    for coeff, monom in poly:
-        term = new_R(coeff)
-        exp = monom.exponents()[0] if hasattr(monom, 'exponents') else None
-        # Use the dict-based approach
-        md = poly.dict() if hasattr(poly, 'dict') else None
-    # Safer approach: use string-based substitution through the polynomial
-    # Actually, let's use the hom approach
     old_gens = old_R.gens()
     images = [name_map.get(str(g), new_R.zero()) for g in old_gens]
     phi = old_R.hom(images, new_R)
@@ -172,12 +166,13 @@ def _homogeneous_monomials(ring, variables, degree):
 def _partitions_with_length(d, n):
     """
     All n-tuples of non-negative integers summing to d.
-    (compositions into n bins)
+    (compositions into n bins, first variable's exponent descending,
+    so monomials come out x_0-major: x_0^d, x_0^(d-1)*x_1, ...)
     """
     if n == 1:
         yield (d,)
         return
-    for i in range(d + 1):
+    for i in range(d, -1, -1):
         for rest in _partitions_with_length(d - i, n - 1):
             yield (i,) + rest
 
@@ -236,9 +231,6 @@ class DiffAlgForm:
             return self.is_zero
         return NotImplemented
 
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
     def __add__(self, other):
         if isinstance(other, DiffAlgForm):
             R, E, x, dx, params = _merge_rings(self, other)
@@ -281,7 +273,7 @@ class DiffAlgForm:
 
     def __truediv__(self, scalar):
         """Division by scalar."""
-        return self * QQ(1) / QQ(scalar)
+        return self * (QQ(1) / QQ(scalar))
 
     def wedge(self, other):
         """Exterior product of two forms."""
@@ -348,6 +340,14 @@ class DiffAlgForm:
         Pull-back by a morphism (list of DiffAlgForm 0-forms).
         morphism = [F_0, ..., F_n] where F_i are 0-forms (polynomials as forms).
         """
+        if len(morphism) != self.n + 1:
+            raise ValueError(
+                f"pullback: morphism must have {self.n + 1} components "
+                f"(one per coordinate x_0..x_{self.n}), got {len(morphism)}"
+            )
+        for fi in morphism:
+            if not isinstance(fi, DiffAlgForm) or fi.degree[1] != 0:
+                raise ValueError("pullback: morphism components must be 0-forms")
         R, E, x, dx, params = _merge_rings(self, *morphism)
         n = max(e.n for e in [self] + morphism)
         pnames = set()
@@ -432,7 +432,8 @@ class DiffAlgForm:
             return R.ideal(all_coeffs)
 
         # Extract coefficients of each x-monomial, which are polynomials in params
-        param_ring = PolynomialRing(QQ, [str(R.gen(i)) for i in range(nparams)])
+        param_ring = PolynomialRing(QQ, nparams,
+                                    [str(R.gen(i)) for i in range(nparams)])
         all_scalars = []
         for poly in mc.values():
             scalars = _extract_param_coefficients(poly, R, n, param_ring)
@@ -442,55 +443,59 @@ class DiffAlgForm:
         return param_ring.ideal(all_scalars)
 
     def is_homogeneous(self):
-        """Test if the form has all terms of the same total degree (poly + form degree)."""
+        """
+        Test if all terms have the same total degree r + d
+        (form degree + polynomial degree in x, per term — as in M2).
+        """
         mc = self.element.monomial_coefficients()
         if not mc:
             return True
+        nparams = len(self.poly_ring.gens()) - (self.n + 1)
         degrees = set()
         for bk, coeff in mc.items():
             r = _degree_of_basis_key(bk)
-            d = _poly_degree_in_x(coeff, self.poly_ring, self.n)
-            degrees.add(r + d)
+            for exp in coeff.exponents():
+                degrees.add(r + sum(exp[nparams:nparams + self.n + 1]))
         return len(degrees) <= 1
 
-    def homogenize(self, new_var_index=None):
+    def homogenize(self):
         """
-        Homogenize the form by adding a new variable x_{n+1}.
-        Returns a form in n+2 variables.
+        Homogenize the form with respect to a new variable x_{n+1}, using the
+        total degree r + d of each term (as in M2, where dx_i has degree 1).
+        Returns a form in n+2 variables; the result is always homogeneous.
         """
-        new_n = self.n + 1
-        if new_var_index is None:
-            new_var_index = new_n
-
-        # Find max total degree in x
         mc = self.element.monomial_coefficients()
         if not mc:
             return self  # zero form
 
-        max_deg = 0
-        for bk, coeff in mc.items():
-            d = _poly_degree_in_x(coeff, self.poly_ring, self.n)
-            if d > max_deg:
-                max_deg = d
+        new_n = self.n + 1
+        old_R = self.poly_ring
+        nparams = len(old_R.gens()) - (self.n + 1)
+        old_gens = old_R.gens()
 
-        # Build new rings with n+2 variables
+        # Max total degree c = max over terms of (r + d_term)
+        c = 0
+        for bk, coeff in mc.items():
+            r = _degree_of_basis_key(bk)
+            for exp in coeff.exponents():
+                c = max(c, r + sum(exp[nparams:nparams + self.n + 1]))
+
         param_names = sorted(self.param_names) if self.param_names else None
         R, E, x, dx, params = _make_rings(new_n, param_names)
+        name_map = {str(g): g for g in R.gens()}
 
         result = E.zero()
-        old_R = self.poly_ring
-        name_map = {str(g): g for g in R.gens()}
         for bk, coeff in mc.items():
-            new_coeff = _sub_poly(coeff, old_R, R, name_map)
-            d = _poly_degree_in_x(coeff, old_R, self.n)
-            # Multiply by x_{new_n}^(max_deg - d)
-            if max_deg - d > 0:
-                new_coeff = new_coeff * x[new_var_index] ** (max_deg - d)
-            indices = _basis_key_to_indices(bk)
-            basis = E.one()
-            for i in indices:
-                basis = basis * E.gen(i)
-            result += new_coeff * basis
+            r = _degree_of_basis_key(bk)
+            basis = _reconstruct_basis(bk, E)
+            for exp, cc in coeff.dict().items():
+                d_t = sum(exp[nparams:nparams + self.n + 1])
+                term = R(QQ(cc))
+                for i, e in enumerate(exp):
+                    if e:
+                        term *= name_map[str(old_gens[i])] ** e
+                term *= x[new_n] ** (c - r - d_t)
+                result += term * basis
 
         return DiffAlgForm(result, R, E, new_n, self.param_names)
 
@@ -518,7 +523,8 @@ class DiffAlgForm:
 
     def randomize(self, ring=ZZ, density=1.0, height=10):
         """
-        Replace all parameter variables with random values.
+        Replace all parameter variables with random values (one draw, as in
+        M2's random: a zero result is returned with a warning, not resampled).
         Returns a form with no parameters.
         """
         import random as pyrandom
@@ -530,32 +536,24 @@ class DiffAlgForm:
 
         # Build new ring without parameters
         x_names = _var_names("x", n)
-        new_R = PolynomialRing(QQ, x_names)
+        new_R = PolynomialRing(QQ, n + 1, x_names)
         dx_names = _var_names("dx", n)
         new_E = ExteriorAlgebra(new_R, dx_names)
 
-        # Random substitution for parameters
-        max_attempts = 10
-        for _ in range(max_attempts):
-            sub_dict = {}
-            for i in range(nparams):
-                if pyrandom.random() <= density:
-                    sub_dict[R.gen(i)] = R(pyrandom.randint(-height, height))
-                else:
-                    sub_dict[R.gen(i)] = R.zero()
-            # Apply substitution
-            mc = self.element.monomial_coefficients()
-            result = new_E.zero()
-            name_map = {str(g): g for g in new_R.gens()}
-            for bk, coeff in mc.items():
-                new_coeff = coeff.subs(sub_dict)
-                # Now move to new_R
-                nc = _sub_poly(new_coeff, R, new_R, name_map)
-                basis = _reconstruct_basis(bk, new_E)
-                result += nc * basis
-            if result != new_E.zero():
-                return DiffAlgForm(result, new_R, new_E, n)
-        raise ValueError("Random substitution produced zero form after multiple attempts")
+        sub_dict = {}
+        for i in range(nparams):
+            if pyrandom.random() <= density:
+                sub_dict[R.gen(i)] = R(pyrandom.randint(-height, height))
+            else:
+                sub_dict[R.gen(i)] = R.zero()
+        result = new_E.zero()
+        name_map = {str(g): g for g in new_R.gens()}
+        for bk, coeff in self.element.monomial_coefficients().items():
+            nc = _sub_poly(coeff.subs(sub_dict), R, new_R, name_map)
+            result += nc * _reconstruct_basis(bk, new_E)
+        if result == new_E.zero():
+            warnings.warn("randomize produced the zero form")
+        return DiffAlgForm(result, new_R, new_E, n)
 
 
 # ─────────────────── DiffAlgField ───────────────────────────────
@@ -625,9 +623,6 @@ class DiffAlgField:
             return self.is_zero
         return NotImplemented
 
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
     def __add__(self, other):
         if isinstance(other, DiffAlgField):
             R, E, x, dx, params = _merge_rings(self, other)
@@ -695,17 +690,62 @@ class DiffAlgField:
         return DiffAlgField(coeffs, R, n, pnames)
 
     def is_homogeneous(self):
-        """Test if all coefficients have the same polynomial degree in x."""
+        """Test if all coefficient terms have the same polynomial degree in x."""
         if not self.coeffs:
             return True
+        nparams = len(self.poly_ring.gens()) - (self.n + 1)
         degrees = set()
         for c in self.coeffs.values():
             if c != 0:
-                degrees.add(_poly_degree_in_x(c, self.poly_ring, self.n))
+                for exp in c.exponents():
+                    degrees.add(sum(exp[nparams:nparams + self.n + 1]))
         return len(degrees) <= 1
 
+    def homogenize(self):
+        """
+        Homogenize the field with respect to a new variable x_{n+1}:
+        all coefficients are made homogeneous of the same degree.
+        Returns a field in n+2 variables (no d/dx_{n+1} component), as in M2.
+        """
+        if not self.coeffs:
+            return self
+
+        new_n = self.n + 1
+        old_R = self.poly_ring
+        nparams = len(old_R.gens()) - (self.n + 1)
+        old_gens = old_R.gens()
+
+        c_max = 0
+        for c in self.coeffs.values():
+            for exp in c.exponents():
+                c_max = max(c_max, sum(exp[nparams:nparams + self.n + 1]))
+
+        param_names = sorted(self.param_names) if self.param_names else None
+        R, E, x, dx, params = _make_rings(new_n, param_names)
+        name_map = {str(g): g for g in R.gens()}
+
+        new_coeffs = {}
+        for i, coeff in self.coeffs.items():
+            val = R.zero()
+            for exp, cc in coeff.dict().items():
+                d_t = sum(exp[nparams:nparams + self.n + 1])
+                term = R(QQ(cc))
+                for k, e in enumerate(exp):
+                    if e:
+                        term *= name_map[str(old_gens[k])] ** e
+                val += term * x[new_n] ** (c_max - d_t)
+            new_coeffs[i] = val
+        return DiffAlgField(new_coeffs, R, new_n, self.param_names)
+
+    def projectivize(self):
+        """Projectivize the field: same as homogenize (as in M2)."""
+        return self.homogenize()
+
     def randomize(self, ring=ZZ, density=1.0, height=10):
-        """Replace all parameter variables with random values."""
+        """
+        Replace all parameter variables with random values (one draw, as in
+        M2's random: a zero result is returned with a warning, not resampled).
+        """
         import random as pyrandom
         R = self.poly_ring
         n = self.n
@@ -714,26 +754,23 @@ class DiffAlgField:
             return self
 
         x_names = _var_names("x", n)
-        new_R = PolynomialRing(QQ, x_names)
+        new_R = PolynomialRing(QQ, n + 1, x_names)
 
-        max_attempts = 10
-        for _ in range(max_attempts):
-            sub_dict = {}
-            for i in range(nparams):
-                if pyrandom.random() <= density:
-                    sub_dict[R.gen(i)] = R(pyrandom.randint(-height, height))
-                else:
-                    sub_dict[R.gen(i)] = R.zero()
-            new_coeffs = {}
-            name_map = {str(g): g for g in new_R.gens()}
-            for idx, c in self.coeffs.items():
-                nc = c.subs(sub_dict)
-                nc = _sub_poly(nc, R, new_R, name_map)
-                if nc != 0:
-                    new_coeffs[idx] = nc
-            if new_coeffs:
-                return DiffAlgField(new_coeffs, new_R, n)
-        raise ValueError("Random substitution produced zero vector field")
+        sub_dict = {}
+        for i in range(nparams):
+            if pyrandom.random() <= density:
+                sub_dict[R.gen(i)] = R(pyrandom.randint(-height, height))
+            else:
+                sub_dict[R.gen(i)] = R.zero()
+        new_coeffs = {}
+        name_map = {str(g): g for g in new_R.gens()}
+        for idx, c in self.coeffs.items():
+            nc = _sub_poly(c.subs(sub_dict), R, new_R, name_map)
+            if nc != 0:
+                new_coeffs[idx] = nc
+        if not new_coeffs:
+            warnings.warn("randomize produced the zero vector field")
+        return DiffAlgField(new_coeffs, new_R, n)
 
 
 # ─────────────────── DiffAlgDistribution ────────────────────────
@@ -835,7 +872,7 @@ def new_form(n_or_expr, r=None, d=None, var_name=None):
         Any other symbols become parameters in the coefficient ring.
         Use * for multiplication, ^ for powers.
     """
-    if isinstance(n_or_expr, (int, Integer_type())):
+    if isinstance(n_or_expr, (int, Integer)):
         n = int(n_or_expr)
         assert r is not None and d is not None and var_name is not None
         return _new_generic_form(n, r, d, var_name)
@@ -847,13 +884,6 @@ def new_form(n_or_expr, r=None, d=None, var_name=None):
         )
 
 
-def Integer_type():
-    from sage.rings.integer import Integer
-    return Integer
-
-
-import re as _re
-
 def _normalize_var_names(expr):
     """Normalize x_0 -> x0, dx_0 -> dx0, ax_0 -> ax0, ^ -> ** in the expression."""
     expr = _re.sub(r'\bdx_(\d+)', r'dx\1', expr)
@@ -861,6 +891,14 @@ def _normalize_var_names(expr):
     expr = _re.sub(r'\bx_(\d+)', r'x\1', expr)
     expr = expr.replace('^', '**')
     return expr
+
+
+def _wrap_int_literals(expr):
+    """
+    Wrap standalone integer literals as Sage Integers before eval, so that
+    e.g. 1/3 is exact rational division instead of Python float division.
+    """
+    return _re.sub(r'(?<![\w.])(\d+)(?![\w.])', r'Integer(\1)', expr)
 
 
 def _parse_expr_tokens(expr):
@@ -903,16 +941,16 @@ def _parse_form_string(expr):
         )
     R, E, x, dx, params = _make_rings(n, param_names if param_names else None)
     # Build a local namespace for eval
-    ns = {}
+    ns = {'Integer': Integer}
     for i in range(n + 1):
         ns[f'x{i}'] = R.gen((len(param_names) if param_names else 0) + i)
         ns[f'dx{i}'] = E.gen(i)
     for j, pname in enumerate(param_names):
         ns[pname] = R.gen(j)
-    result = eval(expr, {"__builtins__": {}}, ns)  # noqa: S307
-    if result.parent() is R:
-        # It's a 0-form (function), wrap it into the exterior algebra
-        result = E(result)
+    result = eval(_wrap_int_literals(expr), {"__builtins__": {}}, ns)  # noqa: S307
+    if not hasattr(result, 'parent') or result.parent() is not E:
+        # Constant or 0-form (polynomial): wrap into the exterior algebra
+        result = E(R(result))
     return DiffAlgForm(result, R, E, n, set(param_names))
 
 
@@ -932,26 +970,35 @@ def _parse_field_string(expr):
     ax_names = [f'ax{i}' for i in range(n + 1)]
     all_tmp_names = (param_names if param_names else []) + \
                     [f'x{i}' for i in range(n + 1)] + ax_names
-    R_tmp = PolynomialRing(QQ, all_tmp_names)
-    ns = {}
+    R_tmp = PolynomialRing(QQ, len(all_tmp_names), all_tmp_names)
+    ns = {'Integer': Integer}
     nparams = len(param_names) if param_names else 0
     for j, pname in enumerate(param_names):
         ns[pname] = R_tmp.gen(j)
     for i in range(n + 1):
         ns[f'x{i}'] = R_tmp.gen(nparams + i)
         ns[f'ax{i}'] = R_tmp.gen(nparams + n + 1 + i)
-    parsed = eval(expr, {"__builtins__": {}}, ns)  # noqa: S307
-    # Extract coefficient of each ax_i
-    coeffs = {}
-    nparams_r = len(param_names) if param_names else 0
-    name_map = {str(g): g for g in R.gens()}
+    parsed = R_tmp(eval(_wrap_int_literals(expr), {"__builtins__": {}}, ns))  # noqa: S307
+    # Extract coefficient of each ax_i (coefficient of ax_i-degree exactly 1)
+    coeffs_tmp = {}
     for i in range(n + 1):
         ax_var = R_tmp.gen(nparams + n + 1 + i)
-        # Coefficient of ax_i in the parsed polynomial
         c = parsed.coefficient(ax_var)
         if c != 0:
-            # Re-embed c into R (it's in R_tmp but only uses x_j and param vars)
-            coeffs[i] = _sub_poly(c, R_tmp, R, name_map)
+            coeffs_tmp[i] = c
+    # Every term must be linear in the ax_i: anything left over (constant
+    # terms, misspelled partials, products ax_i*ax_j) cannot be represented
+    # as a vector field and must not be dropped silently.
+    residual = parsed - sum(
+        c * R_tmp.gen(nparams + n + 1 + i) for i, c in coeffs_tmp.items()
+    )
+    if residual != 0:
+        raise ValueError(
+            f"new_field: expression has terms that are not linear in the "
+            f"partials ax_0..ax_{n}: {residual}"
+        )
+    name_map = {str(g): g for g in R.gens()}
+    coeffs = {i: _sub_poly(c, R_tmp, R, name_map) for i, c in coeffs_tmp.items()}
     return DiffAlgField(coeffs, R, n, set(param_names))
 
 
@@ -967,17 +1014,18 @@ def _new_generic_form(n, r, d, var_name):
 
     R, E, x, dx, params = _make_rings(n, param_names)
 
-    # Build the generic form
+    # Build the generic form. Parameter order follows M2's
+    # basis(d) ** basis(r) tensor: x-monomial outer, dx-monomial inner.
     x_monoms = _homogeneous_monomials(R, x, d)
     dx_combos = list(combinations(range(n + 1), r))
 
     result = E.zero()
     param_idx = 0
-    for dx_combo in dx_combos:
-        dx_prod = E.one()
-        for k in dx_combo:
-            dx_prod = dx_prod * dx[k]
-        for x_mon in x_monoms:
+    for x_mon in x_monoms:
+        for dx_combo in dx_combos:
+            dx_prod = E.one()
+            for k in dx_combo:
+                dx_prod = dx_prod * dx[k]
             result += params[param_idx] * x_mon * dx_prod
             param_idx += 1
 
@@ -997,7 +1045,7 @@ def new_field(n_or_expr, d=None, var_name=None):
         Any other symbols become parameters in the coefficient ring.
         Use * for multiplication, ^ for powers.
     """
-    if isinstance(n_or_expr, (int, Integer_type())):
+    if isinstance(n_or_expr, (int, Integer)):
         n = int(n_or_expr)
         assert d is not None and var_name is not None
         return _new_generic_field(n, d, var_name)
@@ -1020,16 +1068,14 @@ def _new_generic_field(n, d, var_name):
 
     R, E, x, dx, params = _make_rings(n, param_names)
 
-    coeffs = {}
+    # Parameter order follows M2: x-monomial outer, ax_i inner.
+    coeffs = {i: R.zero() for i in range(n + 1)}
     param_idx = 0
     x_monoms = _homogeneous_monomials(R, x, d)
-    for i in range(n + 1):
-        val = R.zero()
-        for x_mon in x_monoms:
-            val += params[param_idx] * x_mon
+    for x_mon in x_monoms:
+        for i in range(n + 1):
+            coeffs[i] += params[param_idx] * x_mon
             param_idx += 1
-        if val != 0:
-            coeffs[i] = val
     return DiffAlgField(coeffs, R, n, set(param_names))
 
 
@@ -1109,13 +1155,6 @@ def logarithmic_form(n, degrees, var_name, projective=False):
 
     # Build the logarithmic form:
     # w = sum_i a_i * (prod_{j≠i} f_j) * df_i
-    coeff_param_names = _generic_param_names(f"{var_name}0", k)
-    # We need the a_i parameters
-
-    # Actually, let's build it step by step merging rings
-    # First create the a_i as 0-forms
-    all_forms = list(F_forms)
-    # Build products and differentials
     terms = []
     for i in range(k):
         # Product of all f_j except f_i
@@ -1135,13 +1174,7 @@ def logarithmic_form(n, degrees, var_name, projective=False):
             term = dfi
         terms.append(term)
 
-    # Sum with coefficients a_0, ..., a_{k-1}
-    # Build common ring including the a_i
-    result = terms[0]
-    for i in range(1, k):
-        result = result + terms[i]
-
-    # Actually, we want a_i coefficients. Let's use linear_comb
+    # Sum with generic coefficients a_0, ..., a_{k-1}
     result = linear_comb(terms, f"{var_name}0")
 
     if projective:
@@ -1181,6 +1214,34 @@ def dist(fields):
 
 
 # ─────────────────── genKer / genIm ─────────────────────────────
+
+def _check_linear_in_params(polys, var_gen_idx_set, what):
+    """
+    Verify that every polynomial has degree <= 1 in the given parameter
+    positions (M2 errors on nonlinear expressions; silently decomposing a
+    nonlinear expression would return garbage).
+    """
+    for P in polys:
+        if P == 0:
+            continue
+        for exp in P.exponents():
+            if sum(exp[i] for i in var_gen_idx_set) > 1:
+                raise ValueError(
+                    f"{what}: expression must be linear in the parameters of var"
+                )
+
+
+def _var_gen_indices(R, var_gens):
+    """Positions of the given generators inside R.gens()."""
+    idx = set()
+    gens = R.gens()
+    for vg in var_gens:
+        for i, g in enumerate(gens):
+            if g == vg:
+                idx.add(i)
+                break
+    return idx
+
 
 def gen_ker(expr, var):
     """
@@ -1243,6 +1304,8 @@ def gen_ker(expr, var):
     # dP/db_j gives the "A column" (doesn't involve b's since P is linear in b)
     # P(b=0) gives the "constant" part C
 
+    _check_linear_in_params(poly_coeffs, var_gen_idx_set, "gen_ker")
+
     sub_zero = {vg: R.zero() for vg in var_gens}
 
     # For each P_k and each b_j: derivative = coefficient of b_j
@@ -1294,7 +1357,7 @@ def gen_ker(expr, var):
 
     # ── Step 4: build the coefficient field and matrix ──
     if has_other:
-        S = PolynomialRing(QQ, other_param_names)
+        S = PolynomialRing(QQ, len(other_param_names), other_param_names)
         K = S.fraction_field()
         # Hom from R → S (maps other_params to S gens, everything else to 0)
         S_name_map = {str(g): g for g in S.gens()}
@@ -1316,12 +1379,7 @@ def gen_ker(expr, var):
     else:
         K = QQ
         def to_K(val):
-            if val == 0:
-                return K.zero()
-            try:
-                return K(val)
-            except (TypeError, ValueError):
-                return K.zero()
+            return K.zero() if val == 0 else K(val)
 
     eq_rows = []
     eq_rhs = []
@@ -1365,10 +1423,15 @@ def gen_ker(expr, var):
             return num_R * R(QQ(1) / QQ(den_R))
         raise ValueError(f"Non-polynomial kernel element: {val}")
 
-    def reconstruct(vec):
-        """Reconstruct form/field from a solution vector in K^m."""
-        # Clear denominators if working over Frac(S)
-        if has_other:
+    def reconstruct(vec, clear_denominators=True):
+        """
+        Reconstruct form/field from a solution vector in K^m.
+
+        clear_denominators=True is only valid for KERNEL vectors (scaling
+        stays in the kernel); the particular solution of M x = b must NOT
+        be rescaled.
+        """
+        if has_other and clear_denominators:
             from sage.all import lcm
             denoms = [v.denominator() for v in vec if v != 0]
             if denoms:
@@ -1403,10 +1466,10 @@ def gen_ker(expr, var):
         zero_elem = _make_zero(var, R, E, n)
         try:
             x_part = M.solve_right(b_vec)
-            particular = reconstruct(x_part)
+            particular = reconstruct(x_part, clear_denominators=False)
             return [basis if basis else [zero_elem], particular]
         except ValueError:
-            # Non-homogeneous system with no solution
+            # No solution, or no polynomial particular solution
             return [basis if basis else [zero_elem], None]
 
     if not basis:
@@ -1492,11 +1555,20 @@ def gen_im(expr, var):
     var_gens = [name_map[p] for p in var_params]
     pnames = (expr.param_names | var.param_names) - set(var_params)
 
-    # Image = span of {expr(b_j = delta_{j,k}) : k = 0..m-1}
-    # i.e., evaluate expr at each "unit vector" in parameter space
+    # Image of the LINEAR part: span of {expr(delta_k) - expr(0) : k}.
+    # (For a non-homogeneous expression the constant part expr(0) must be
+    # subtracted; M2 errors in that case instead.)
+    sub0 = {var_gens[j]: R.zero() for j in range(m)}
     if isinstance(expr, DiffAlgForm):
         expr_re = _reembed_form(expr, R, E, x, dx)
         mc = expr_re.monomial_coefficients()
+        _check_linear_in_params(mc.values(),
+                                _var_gen_indices(R, var_gens), "gen_im")
+        base = E.zero()
+        for bk, coeff in mc.items():
+            nc = coeff.subs(sub0)
+            if nc != 0:
+                base += nc * _reconstruct_basis(bk, E)
         images = []
         for k in range(m):
             sub = {var_gens[j]: (R.one() if j == k else R.zero())
@@ -1506,7 +1578,7 @@ def gen_im(expr, var):
                 nc = coeff.subs(sub)
                 if nc != 0:
                     img += nc * _reconstruct_basis(bk, E)
-            images.append(img)
+            images.append(img - base)
 
         # Find linearly independent subset using matrix rank
         # Vectorize each image
@@ -1539,13 +1611,16 @@ def gen_im(expr, var):
 
     elif isinstance(expr, DiffAlgField):
         expr_coeffs = _reembed_field_coeffs(expr, R)
+        _check_linear_in_params(expr_coeffs.values(),
+                                _var_gen_indices(R, var_gens), "gen_im")
+        base_coeffs = {i: c.subs(sub0) for i, c in expr_coeffs.items()}
         images = []
         for k in range(m):
             sub = {var_gens[j]: (R.one() if j == k else R.zero())
                    for j in range(m)}
             new_coeffs = {}
             for i, c in expr_coeffs.items():
-                nc = c.subs(sub)
+                nc = c.subs(sub) - base_coeffs.get(i, R.zero())
                 if nc != 0:
                     new_coeffs[i] = nc
             images.append(new_coeffs)
@@ -1672,23 +1747,9 @@ def _extract_param_coefficients(poly, R, n, param_ring):
     extract the coefficient of each x-monomial (which is a polynomial in params).
     """
     nparams = len(R.gens()) - (n + 1)
-    x_vars = [R.gen(nparams + i) for i in range(n + 1)]
 
-    # Collect coefficients of all x-monomials
-    result = []
-    # Use the .coefficient() method for each monomial
-    # Or iterate over terms and group by x-part
     if poly == 0:
         return []
-    for c, m in poly:
-        # c is in QQ, m is a monomial
-        exp = m.exponents()[0]
-        # The param part
-        param_part = param_ring.one()
-        for i in range(nparams):
-            if exp[i] > 0:
-                param_part *= param_ring.gen(i) ** exp[i]
-        result.append(QQ(c) * param_part)
     # Group by x-monomial → sum the param contributions
     from collections import defaultdict
     grouped = defaultdict(lambda: param_ring.zero())
